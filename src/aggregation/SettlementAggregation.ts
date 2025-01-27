@@ -1,10 +1,8 @@
-import { Field, MerkleMap, MerkleMapWitness, SelfProof, Struct, ZkProgram } from 'o1js';
+import { Field, MerkleMapWitness, SelfProof, Struct, ZkProgram } from 'o1js';
 
-import Settle from '../contract/Settle.js';
+import { PERCENTAGE_DIVISOR } from '../lib/constants.js';
 
 import SignatureAggregation from './SignatureAggregation.js';
-
-const PERCENTAGE_DIVISOR = Settle.PERCENTAGE_DIVISOR;
 
 namespace SettlementAggregationNamespace {
   export class PublicOutputs extends Struct({
@@ -28,7 +26,7 @@ namespace SettlementAggregationNamespace {
           signersTreeRoot: Field,
           signersCount: Field,
           settleConditionPercentage: Field
-        )  {
+        ) {
 
           return { publicOutput: {
             initialVerifiedMessagesRoot,
@@ -46,7 +44,7 @@ namespace SettlementAggregationNamespace {
           previousProof: SelfProof<void, PublicOutputs>,
           signatureAggregationProof: SignatureAggregation.Proof,
           updateWitness: MerkleMapWitness
-        )  {
+        ) {
           previousProof.verify();
           signatureAggregationProof.verify();
 
@@ -60,8 +58,7 @@ namespace SettlementAggregationNamespace {
           state.newVerifiedMessagesRoot.assertEquals(previousRoot);
           update.message.assertEquals(previousKey);
 
-          const [ newRoot, newKey ] = updateWitness.computeRootAndKey(Field.from(1));
-          update.message.assertEquals(newKey);
+          const [ newRoot, _ ] = updateWitness.computeRootAndKey(Field.from(1));
 
           return { publicOutput: {
             initialVerifiedMessagesRoot: state.initialVerifiedMessagesRoot,

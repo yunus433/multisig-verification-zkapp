@@ -1,9 +1,9 @@
-import { Field, Poseidon, PrivateKey, PublicKey, Signature } from 'o1js';
+import { Field, MerkleMap, MerkleMapWitness, Poseidon, PrivateKey, PublicKey, Signature } from 'o1js';
 
-import MerkleTree from '../lib/MerkleTree.js';
-import { SignatureWrapper, SignatureList, MAX_SIGNATURE_COUNT } from '../lib/SignatureList.js';
+import { SIGNATURE_COUNT_PER_LIST } from '../lib/constants.js';
+import { SignatureWrapper, SignatureList } from '../lib/SignatureList.js';
 
-const SIGNER_COUNT = Math.floor(MAX_SIGNATURE_COUNT * Math.random()); // Must be an integer between 1 and MAX_SIGNATURE_COUNT
+const SIGNER_COUNT = Math.floor(SIGNATURE_COUNT_PER_LIST * Math.random()); // Must be an integer between 1 and SIGNATURE_COUNT_PER_LIST
 
 describe('/lib/SignatureList.ts Test', () => {
   const dataToSign = Field.random();
@@ -14,45 +14,42 @@ describe('/lib/SignatureList.ts Test', () => {
   });
   const signerPublicKeys = signerPrivateKeys.map(each => each.toPublicKey());
 
-  const signersTree = MerkleTree.createFromFieldArray(signerPrivateKeys.map(each => Poseidon.hash(each.toPublicKey().toFields())));
+  const signersTree = new MerkleMap();
+  signerPublicKeys.forEach(pubKey => signersTree.set(Poseidon.hash(pubKey.toFields()), Field(1)));
 
-  if (!signersTree)
-    throw new Error('Tree cannot be created');
-
-  it('correctly creates SignatureWrapper', () => {
+  it('creates SignatureWrapper', () => {
     const index = Math.floor(Math.random() * SIGNER_COUNT);
-    const merkleTreeIndex = MerkleTree.indexOf(signerPublicKeys.map(each => each.toBase58()), signerPublicKeys[index].toBase58());
-
     const signer = signerPrivateKeys[index];
 
     const signatureWrapper = new SignatureWrapper(
       signer.toPublicKey(),
       Signature.create(signer, [ dataToSign ]),
-      new MerkleTree.Witness(signersTree.getWitness(BigInt(merkleTreeIndex)))
+      signersTree.getWitness(Poseidon.hash(signer.toPublicKey().toFields()))
     );
 
     expect(signatureWrapper.publicKey.equals(signer.toPublicKey()).toBoolean()).toEqual(true);
     expect(signatureWrapper.signature.verify(signer.toPublicKey(), [ dataToSign ]).toBoolean()).toEqual(true);
-    expect(signatureWrapper.witness.calculateRoot(Poseidon.hash(signer.toPublicKey().toFields())).equals(signersTree.getRoot()).toBoolean()).toEqual(true);
+    const [witnessRoot, witnessKey] = signatureWrapper.witness.computeRootAndKey(Field(1));
+    expect(witnessRoot.equals(signersTree.getRoot()).toBoolean()).toEqual(true);
+    expect(witnessKey.equals(Poseidon.hash(signer.toPublicKey().toFields())).toBoolean()).toEqual(true);
   });
 
   const signatures = Array.from({ length: SIGNER_COUNT }, (_, i: number) => {
     const signer = signerPrivateKeys[i];
-    const merkleTreeIndex = MerkleTree.indexOf(signerPublicKeys.map(each => each.toBase58()), signerPublicKeys[i].toBase58());
 
     return new SignatureWrapper(
       signer.toPublicKey(),
       Signature.create(signer, [ dataToSign ]),
-      new MerkleTree.Witness(signersTree.getWitness(BigInt(merkleTreeIndex)))
+      signersTree.getWitness(Poseidon.hash(signer.toPublicKey().toFields()))
     );
   });
 
   let signatureList: SignatureList;
 
-  it('correctly creates SignatureList', () => {
+  it('creates SignatureList', () => {
     signatureList = new SignatureList(signatures);
 
-    for (let i = 0; i < MAX_SIGNATURE_COUNT; i++) {
+    for (let i = 0; i < SIGNATURE_COUNT_PER_LIST; i++) {
       const signatureWrapper = signatureList.list[i];
 
       if (i < SIGNER_COUNT) {
@@ -86,7 +83,7 @@ describe('/lib/SignatureList.ts Test', () => {
     signatures[SIGNER_COUNT - 1] = new SignatureWrapper(
       PublicKey.fromBase58(temp.publicKey),
       Signature.fromBase58(temp.signature),
-      MerkleTree.Witness.fromJSON(temp.witness)
+      MerkleMapWitness.fromJSON(temp.witness)
     );
 
     const validCount = index + 1;

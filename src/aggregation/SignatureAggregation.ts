@@ -22,7 +22,7 @@ namespace SignatureAggregationNamespace {
           message: Field,
           signersTreeRoot: Field,
           signatures: SignatureList
-        )  {
+        ) {
           const output = signatures.getValidCount(message, signersTreeRoot);
 
           return { publicOutput: {

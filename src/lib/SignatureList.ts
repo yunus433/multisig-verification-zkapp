@@ -1,21 +1,20 @@
-import { Bool, Field, Poseidon, PrivateKey, Provable, PublicKey, Signature, Struct } from 'o1js';
+import { Bool, Field, MerkleMapWitness, Poseidon, PrivateKey, Provable, PublicKey, Signature, Struct } from 'o1js';
 
-import MerkleTree from './MerkleTree.js';
+import { SIGNATURE_COUNT_PER_LIST } from './constants.js';
 
 export const EMPTY_PRIVATE_KEY = PrivateKey.random();
-export const MAX_SIGNATURE_COUNT = 20;
 
 const EMPTY_PUBLIC_KEY = EMPTY_PRIVATE_KEY.toPublicKey();
 
 export class SignatureWrapper extends Struct({
   publicKey: PublicKey,
   signature: Signature,
-  witness: MerkleTree.Witness
+  witness: MerkleMapWitness
 }) {
   constructor(
     readonly publicKey: PublicKey,
     readonly signature: Signature,
-    readonly witness: MerkleTree.Witness
+    readonly witness: MerkleMapWitness
   ) {
     super({
       signature,
@@ -28,7 +27,7 @@ export class SignatureWrapper extends Struct({
     return new this(
       EMPTY_PUBLIC_KEY,
       Signature.empty(),
-      MerkleTree.Witness.empty()
+      MerkleMapWitness.empty()
     );
   };
 
@@ -44,12 +43,11 @@ export class SignatureWrapper extends Struct({
     message: Field,
     root: Field
   ): Bool {
+    const [witnessRoot, witnessKey] = this.witness.computeRootAndKey(Field(1));
+
     return this.signature.verify(this.publicKey, [ message ])
-      .and(
-      root.equals(this.witness.calculateRoot(
-        this.hash()
-      ))
-    );
+      .and(root.equals(witnessRoot))
+      .and(this.hash().equals(witnessKey));
   };
 };
 
@@ -60,17 +58,17 @@ export class SignatureListOutput extends Struct({
 }) {};
 
 export class SignatureList extends Struct({
-  list: Provable.Array(SignatureWrapper, MAX_SIGNATURE_COUNT)
+  list: Provable.Array(SignatureWrapper, SIGNATURE_COUNT_PER_LIST)
 }) {
   constructor(
     value: SignatureWrapper[]
   ) {
-    if (value.length > MAX_SIGNATURE_COUNT)
-      throw new Error(`Please provide less than ${MAX_SIGNATURE_COUNT} signatures to create a SignatureList.`)
+    if (value.length > SIGNATURE_COUNT_PER_LIST)
+      throw new Error(`Please provide less than ${SIGNATURE_COUNT_PER_LIST} signatures to create a SignatureList.`)
 
     const completeList = value;
 
-    while (completeList.length < MAX_SIGNATURE_COUNT)
+    while (completeList.length < SIGNATURE_COUNT_PER_LIST)
       completeList.push(SignatureWrapper.empty());
 
     super({ list: completeList });
@@ -79,7 +77,7 @@ export class SignatureList extends Struct({
 
   static empty() {
     return new this(Array.from(
-      { length: MAX_SIGNATURE_COUNT },
+      { length: SIGNATURE_COUNT_PER_LIST },
       () => SignatureWrapper.empty()
     ));
   };
@@ -93,7 +91,7 @@ export class SignatureList extends Struct({
     const smallestSignatureHash = Provable.if(condition, this.list[0].hash(), Field(0));
     let greatestSignatureHash = Provable.if(condition, this.list[0].hash(), Field(0));
 
-    for (let i = 1; i < MAX_SIGNATURE_COUNT; i++) {
+    for (let i = 1; i < SIGNATURE_COUNT_PER_LIST; i++) {
       condition = condition.and(this.list[i].verify(message, root).and(
         this.list[i].hash().greaterThan(this.list[i - 1].hash())
       ));

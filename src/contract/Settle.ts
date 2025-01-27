@@ -1,22 +1,29 @@
-import { Bool, Field, method, MerkleMapWitness, Permissions, Poseidon, PrivateKey, Provable, PublicKey, Signature, SmartContract, state, State, Struct } from 'o1js';
+import { Bool, Field, method, MerkleMapWitness, Permissions, Poseidon, PrivateKey, Provable, PublicKey, Signature, SmartContract, state, State, Struct, MerkleMap } from 'o1js';
 
 import SignatureAggregation from '../aggregation/SignatureAggregation.js';
 import SettleAggregation from '../aggregation/SettlementAggregation.js';
 
-import MerkleTree from '../lib/MerkleTree.js';
+import { SETTLE_CONDITION_PERCENTAGE, PERCENTAGE_DIVISOR } from '../lib/constants.js';
+import { stringToFieldArray } from '../lib/utils.js';
 
 namespace SettleNamespace {
-  export const SETTLE_CONDITION_PERCENTAGE : Field = Field(6666); // 66.66%
-  export const PERCENTAGE_DIVISOR = 10000;
+  const SIGNER_NODE_ADD_MESSAGE_PREFIX = Poseidon.hash(stringToFieldArray('signer-node-addition'));
+  const SIGNER_NODE_REM_MESSAGE_PREFIX = Poseidon.hash(stringToFieldArray('signer-node-removal'));
 
   export class Contract extends SmartContract {
-    @state(PublicKey) verifier: State<PublicKey>;
-    @state(Field) signersTreeRoot: State<Field>;
-    @state(Field) signersCount: State<Field>;
-    @state(Field) verifiedMessages: State<Field>;
+    @state(PublicKey) verifier = State<PublicKey>();
+    @state(Field) signersTreeRoot= State<Field>();
+    @state(Field) signersCount = State<Field>();
+    @state(Field) verifiedMessages= State<Field>();
 
     async deploy() {
       await super.deploy();
+
+      this.verifier.set(PublicKey.empty());
+      this.signersTreeRoot.set(Field(0));
+      this.signersCount.set(Field(0));
+      this.verifiedMessages.set(Field(0));
+
       this.account.permissions.set({
         ...Permissions.default(),
         send: Permissions.proof(),
@@ -29,13 +36,15 @@ namespace SettleNamespace {
     @method
     async initialize(
       verifier: PrivateKey,
-      genesisMerkleRoot: Field
+      genesisSignersTreeRoot: Field,
+      signersCount: Field
     ) {
       this.account.provedState.requireEquals(Bool(false));
 
       this.verifier.set(verifier.toPublicKey());
-      this.signersTreeRoot.set(genesisMerkleRoot);
-      this.verifiedMessages.set(MerkleTree.emptyRoot());
+      this.signersTreeRoot.set(genesisSignersTreeRoot);
+      this.signersCount.set(signersCount);
+      this.verifiedMessages.set((new MerkleMap()).getRoot());
     };
 
     @method
@@ -44,30 +53,22 @@ namespace SettleNamespace {
       proof: SignatureAggregation.Proof,
       updateWitness: MerkleMapWitness
     ) {
-      // Allow settlement only by the Verifier
       this.verifier.requireEquals(verifier.toPublicKey());
 
       proof.verify();
 
-      // Verify the inclusionRoot is the same
       this.signersTreeRoot.requireEquals(proof.publicOutput.signersTreeRoot);
 
-      // Verify the settle condition
       const signersCount = this.signersCount.getAndRequireEquals();
 
       // SETTLE_CONDITION_PERCENTAGE / PERCENTAGE_DIVISOR <= proof.publicOutput.count / signersCount
       SETTLE_CONDITION_PERCENTAGE.mul(signersCount).assertLessThanOrEqual(proof.publicOutput.count.mul(PERCENTAGE_DIVISOR));
 
-      // Assert the previousRoot is correct
-      const [updateRoot, updateKey] = updateWitness.computeRootAndKey(Field.from(0));
+      const [updateRoot, updateKey] = updateWitness.computeRootAndKey(Field(0));
       this.verifiedMessages.requireEquals(updateRoot);
       updateKey.assertEquals(proof.publicOutput.message);
 
-      // Compute the new root
-      const [newRoot, newKey] = updateWitness.computeRootAndKey(Field.from(1));
-      newKey.assertEquals(proof.publicOutput.message);
-
-      // Update the root
+      const [newRoot, _] = updateWitness.computeRootAndKey(Field(1));
       this.verifiedMessages.set(newRoot);
     };
 
@@ -76,27 +77,78 @@ namespace SettleNamespace {
       verifier: PrivateKey,
       proof: SettleAggregation.Proof
     ) {
-      // Allow settlement only by the Verifier
       this.verifier.requireEquals(verifier.toPublicKey());
 
       proof.verify();
 
-      // Assert the previousRoot is correct
       this.verifiedMessages.requireEquals(proof.publicOutput.newVerifiedMessagesRoot);
 
-      // Verify the inclusionRoot is the same
       this.signersTreeRoot.requireEquals(proof.publicOutput.signersTreeRoot);
 
-      // Verify the signerCount is the same
       this.signersCount.requireEquals(proof.publicOutput.signersCount);
 
-      // Verify the settleConditionPercentage is the same
       SETTLE_CONDITION_PERCENTAGE.assertEquals(proof.publicOutput.settleConditionPercentage);
 
-      // Update the root
       this.verifiedMessages.set(proof.publicOutput.newVerifiedMessagesRoot);
     };
 
+    @method
+    async addSigner(
+      verifier: PrivateKey,
+      proof: SignatureAggregation.Proof,
+      newSigner: PublicKey,
+      witness: MerkleMapWitness
+    ) {
+      this.verifier.requireEquals(verifier.toPublicKey());
+
+      proof.verify();
+
+      this.signersTreeRoot.requireEquals(proof.publicOutput.signersTreeRoot);
+
+      const signersCount = this.signersCount.getAndRequireEquals();
+
+      // SETTLE_CONDITION_PERCENTAGE / PERCENTAGE_DIVISOR <= proof.publicOutput.count / signersCount
+      SETTLE_CONDITION_PERCENTAGE.mul(signersCount).assertLessThanOrEqual(proof.publicOutput.count.mul(PERCENTAGE_DIVISOR));
+
+      const message = Poseidon.hash(newSigner.toFields().concat(SIGNER_NODE_ADD_MESSAGE_PREFIX));
+      message.assertEquals(proof.publicOutput.message);
+
+      const [witnessRoot, witnessKey] = witness.computeRootAndKey(Field(0));
+      witnessKey.assertEquals(Poseidon.hash(newSigner.toFields()));
+      this.signersTreeRoot.requireEquals(witnessRoot);
+
+      const [newRoot, _] = witness.computeRootAndKey(Field(1));
+      this.signersTreeRoot.set(newRoot);
+    };
+
+    @method
+    async removeSigner(
+      verifier: PrivateKey,
+      proof: SignatureAggregation.Proof,
+      newSigner: PublicKey,
+      witness: MerkleMapWitness
+    ) {
+      this.verifier.requireEquals(verifier.toPublicKey());
+
+      proof.verify();
+
+      this.signersTreeRoot.requireEquals(proof.publicOutput.signersTreeRoot);
+
+      const signersCount = this.signersCount.getAndRequireEquals();
+
+      // SETTLE_CONDITION_PERCENTAGE / PERCENTAGE_DIVISOR <= proof.publicOutput.count / signersCount
+      SETTLE_CONDITION_PERCENTAGE.mul(signersCount).assertLessThanOrEqual(proof.publicOutput.count.mul(PERCENTAGE_DIVISOR));
+
+      const message = Poseidon.hash(newSigner.toFields().concat(SIGNER_NODE_REM_MESSAGE_PREFIX));
+      message.assertEquals(proof.publicOutput.message);
+
+      const [witnessRoot, witnessKey] = witness.computeRootAndKey(Field(1));
+      witnessKey.assertEquals(Poseidon.hash(newSigner.toFields()));
+      this.signersTreeRoot.requireEquals(witnessRoot);
+
+      const [newRoot, _] = witness.computeRootAndKey(Field(0));
+      this.signersTreeRoot.set(newRoot);
+    };
   };
 };
 
