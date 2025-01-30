@@ -2,10 +2,11 @@
 
 import { AccountUpdate, Field, MerkleMap, MerkleMapWitness, Mina, Poseidon, PrivateKey, PublicKey, Signature, VerificationKey, verify } from 'o1js';
 
-import Settle from '../contract/Settle.js';
+import Settle from '../contract/Settlement.js';
 
 import SignatureAggregation from '../aggregation/SignatureAggregation.js';
 
+import { SIGNATURE_COUNT_PER_LIST } from '../lib/constants.js';
 import { SignatureList, SignatureWrapper } from '../lib/SignatureList.js';
 
 const SIGNER_COUNT = 66; // Must be an integer bigger than SIGNATURE_COUNT_PER_LIST to test aggregation
@@ -21,7 +22,7 @@ describe('/contract/Settle.ts Test', () => {
 
   const verifier = PrivateKey.random();
   const signersCount = Field(SIGNER_COUNT);
-  const verifiedMessagesTree = new MerkleMap();
+  const verifiedDataTreeRoot = new MerkleMap();
   const signersTree = new MerkleMap();
 
   const dataToSign = Field.random();
@@ -89,78 +90,78 @@ describe('/contract/Settle.ts Test', () => {
     expect(zkApp.verifier.get().equals(verifier.toPublicKey())).toEqual(true);
     expect(zkApp.signersTreeRoot.get().equals(signersTree.getRoot())).toEqual(true);
     expect(zkApp.signersCount.get().equals(signersCount)).toEqual(true);
-    expect(zkApp.verifiedMessages.get().equals(verifiedMessagesTree.getRoot())).toEqual(true);
+    expect(zkApp.verifiedDataTreeRoot.get().equals(verifiedDataTreeRoot.getRoot())).toEqual(true);
   });
 
-  // let aggregationCount = Math.floor(SIGNER_COUNT / SIGNATURE_COUNT_PER_LIST) + (SIGNER_COUNT % SIGNATURE_COUNT_PER_LIST === 0 ? 0 : 1) - 1;
-  // let signatureAggregationProof : SignatureAggregation.Proof;
-  // let validCount : Field;
+  let aggregationCount = Math.floor(SIGNER_COUNT / SIGNATURE_COUNT_PER_LIST) + (SIGNER_COUNT % SIGNATURE_COUNT_PER_LIST === 0 ? 0 : 1) - 1;
+  let signatureAggregationProof : SignatureAggregation.Proof;
+  let validCount : Field;
 
-  // it('generates the base case aggregation proof', async () => {
-  //   const signatureList = new SignatureList(signatures.filter((_, i) => i < SIGNATURE_COUNT_PER_LIST));
+  it('generates the base case aggregation proof', async () => {
+    const signatureList = new SignatureList(signatures.filter((_, i) => i < SIGNATURE_COUNT_PER_LIST));
 
-  //   console.time('proof base aggregation time')
-  //   signatureAggregationProof = (await SignatureAggregation.Program.base(
-  //     dataToSign,
-  //     signersTree.getRoot(),
-  //     signatureList
-  //   )).proof;
-  //   console.timeEnd('proof base aggregation time');
+    console.time('proof base aggregation time')
+    signatureAggregationProof = (await SignatureAggregation.Program.base(
+      dataToSign,
+      signersTree.getRoot(),
+      signatureList
+    )).proof;
+    console.timeEnd('proof base aggregation time');
 
-  //   const isProofValid = await verify(signatureAggregationProof, verificationKey);
-  //   const signatureListOutput = signatureList.getValidCount(dataToSign, signersTree.getRoot());
-  //   const publicOutput = signatureAggregationProof.publicOutput;
+    const isProofValid = await verify(signatureAggregationProof, verificationKey);
+    const signatureListOutput = signatureList.getValidCount(dataToSign, signersTree.getRoot());
+    const publicOutput = signatureAggregationProof.publicOutput;
 
-  //   expect(isProofValid).toEqual(true);
-  //   expect(publicOutput.count.equals(signatureListOutput.count).toBoolean()).toEqual(true);
-  //   expect(publicOutput.greatestSignerHash.equals(signatureListOutput.greatest_signature_hash).toBoolean()).toEqual(true);
-  //   expect(publicOutput.message.equals(dataToSign).toBoolean()).toEqual(true);
-  //   expect(publicOutput.signersTreeRoot.equals(signersTree.getRoot()).toBoolean()).toEqual(true);
+    expect(isProofValid).toEqual(true);
+    expect(publicOutput.count.equals(signatureListOutput.count).toBoolean()).toEqual(true);
+    expect(publicOutput.greatestSignerHash.equals(signatureListOutput.greatest_signature_hash).toBoolean()).toEqual(true);
+    expect(publicOutput.message.equals(dataToSign).toBoolean()).toEqual(true);
+    expect(publicOutput.signersTreeRoot.equals(signersTree.getRoot()).toBoolean()).toEqual(true);
 
-  //   validCount = publicOutput.count;
-  // });
+    validCount = publicOutput.count;
+  });
 
-  // for (let i = 1; i < aggregationCount + 1; i++)
-  //   it(`generates the ${i}. aggregation proof`, async () => {
-  //     const signatureList = new SignatureList(signatures.filter((_, j) => j > SIGNATURE_COUNT_PER_LIST * i && j < SIGNATURE_COUNT_PER_LIST * (i + 1)));
+  for (let i = 1; i < aggregationCount + 1; i++)
+    it(`generates the ${i}. aggregation proof`, async () => {
+      const signatureList = new SignatureList(signatures.filter((_, j) => j > SIGNATURE_COUNT_PER_LIST * i && j < SIGNATURE_COUNT_PER_LIST * (i + 1)));
 
-  //     console.time(`proof step ${i} base aggregation time`)
-  //     signatureAggregationProof = (await SignatureAggregation.Program.step(
-  //       signatureAggregationProof,
-  //       signatureList
-  //     )).proof;
-  //     console.timeEnd(`proof step ${i} base aggregation time`)
+      console.time(`proof step ${i} base aggregation time`)
+      signatureAggregationProof = (await SignatureAggregation.Program.step(
+        signatureAggregationProof,
+        signatureList
+      )).proof;
+      console.timeEnd(`proof step ${i} base aggregation time`)
 
-  //     const isProofValid = await verify(signatureAggregationProof, verificationKey);
-  //     const signatureListOutput = signatureList.getValidCount(dataToSign, signersTree.getRoot());
-  //     const publicOutput = signatureAggregationProof.publicOutput;
+      const isProofValid = await verify(signatureAggregationProof, verificationKey);
+      const signatureListOutput = signatureList.getValidCount(dataToSign, signersTree.getRoot());
+      const publicOutput = signatureAggregationProof.publicOutput;
 
-  //     validCount = validCount.add(signatureListOutput.count);
+      validCount = validCount.add(signatureListOutput.count);
 
-  //     expect(isProofValid).toEqual(true);
-  //     expect(publicOutput.count.equals(validCount).toBoolean()).toEqual(true);
-  //     expect(publicOutput.greatestSignerHash.equals(signatureListOutput.greatest_signature_hash).toBoolean()).toEqual(true);
-  //     expect(publicOutput.message.equals(dataToSign).toBoolean()).toEqual(true);
-  //     expect(publicOutput.signersTreeRoot.equals(signersTree.getRoot()).toBoolean()).toEqual(true);
-  //   });
+      expect(isProofValid).toEqual(true);
+      expect(publicOutput.count.equals(validCount).toBoolean()).toEqual(true);
+      expect(publicOutput.greatestSignerHash.equals(signatureListOutput.greatest_signature_hash).toBoolean()).toEqual(true);
+      expect(publicOutput.message.equals(dataToSign).toBoolean()).toEqual(true);
+      expect(publicOutput.signersTreeRoot.equals(signersTree.getRoot()).toBoolean()).toEqual(true);
+    });
 
-  // it('settles the aggregation proof', async () => {
-  //   const txn = await Mina.transaction(deployerAccount, async () => {
-  //     AccountUpdate.fundNewAccount(deployerAccount);
-  //     await zkApp.settle(
-  //       verifier,
-  //       signatureAggregationProof,
-  //       verifiedMessagesTree.getWitness(dataToSign)
-  //     );
-  //   });
-  //   await txn.prove();
-  //   await txn.sign([deployerKey, zkAppPrivateKey]).send();
+  it('settles the aggregation proof', async () => {
+    const txn = await Mina.transaction(deployerAccount, async () => {
+      AccountUpdate.fundNewAccount(deployerAccount);
+      await zkApp.settle(
+        verifier,
+        signatureAggregationProof,
+        verifiedDataTreeRoot.getWitness(dataToSign)
+      );
+    });
+    await txn.prove();
+    await txn.sign([deployerKey, zkAppPrivateKey]).send();
 
-  //   verifiedMessagesTree.set(dataToSign, Field(1));
+    verifiedDataTreeRoot.set(dataToSign, Field(1));
 
-  //   expect(zkApp.verifier.get().equals(verifier.toPublicKey())).toEqual(true);
-  //   expect(zkApp.signersTreeRoot.get().equals(signersTree.getRoot())).toEqual(true);
-  //   expect(zkApp.signersCount.get().equals(signersCount)).toEqual(true);
-  //   expect(zkApp.verifiedMessages.get().equals(verifiedMessagesTree.getRoot())).toEqual(true);
-  // })
+    expect(zkApp.verifier.get().equals(verifier.toPublicKey())).toEqual(true);
+    expect(zkApp.signersTreeRoot.get().equals(signersTree.getRoot())).toEqual(true);
+    expect(zkApp.signersCount.get().equals(signersCount)).toEqual(true);
+    expect(zkApp.verifiedDataTreeRoot.get().equals(verifiedDataTreeRoot.getRoot())).toEqual(true);
+  })
 });

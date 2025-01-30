@@ -6,7 +6,7 @@ import SettleAggregation from '../aggregation/SettlementAggregation.js';
 import { SETTLE_CONDITION_PERCENTAGE, PERCENTAGE_DIVISOR } from '../lib/constants.js';
 import { stringToFieldArray } from '../lib/utils.js';
 
-namespace SettleNamespace {
+namespace SettlementNamespace {
   const SIGNER_NODE_ADD_MESSAGE_PREFIX = Poseidon.hash(stringToFieldArray('signer-node-addition'));
   const SIGNER_NODE_REM_MESSAGE_PREFIX = Poseidon.hash(stringToFieldArray('signer-node-removal'));
 
@@ -14,7 +14,7 @@ namespace SettleNamespace {
     @state(PublicKey) verifier = State<PublicKey>();
     @state(Field) signersTreeRoot= State<Field>();
     @state(Field) signersCount = State<Field>();
-    @state(Field) verifiedMessages= State<Field>();
+    @state(Field) verifiedDataTreeRoot= State<Field>();
 
     async deploy() {
       await super.deploy();
@@ -22,7 +22,7 @@ namespace SettleNamespace {
       this.verifier.set(PublicKey.empty());
       this.signersTreeRoot.set(Field(0));
       this.signersCount.set(Field(0));
-      this.verifiedMessages.set(Field(0));
+      this.verifiedDataTreeRoot.set(Field(0));
 
       this.account.permissions.set({
         ...Permissions.default(),
@@ -44,7 +44,7 @@ namespace SettleNamespace {
       this.verifier.set(verifier.toPublicKey());
       this.signersTreeRoot.set(genesisSignersTreeRoot);
       this.signersCount.set(signersCount);
-      this.verifiedMessages.set((new MerkleMap()).getRoot());
+      this.verifiedDataTreeRoot.set((new MerkleMap()).getRoot());
     };
 
     @method
@@ -65,11 +65,11 @@ namespace SettleNamespace {
       SETTLE_CONDITION_PERCENTAGE.mul(signersCount).assertLessThanOrEqual(proof.publicOutput.count.mul(PERCENTAGE_DIVISOR));
 
       const [updateRoot, updateKey] = updateWitness.computeRootAndKey(Field(0));
-      this.verifiedMessages.requireEquals(updateRoot);
+      this.verifiedDataTreeRoot.requireEquals(updateRoot);
       updateKey.assertEquals(proof.publicOutput.message);
 
       const [newRoot, _] = updateWitness.computeRootAndKey(Field(1));
-      this.verifiedMessages.set(newRoot);
+      this.verifiedDataTreeRoot.set(newRoot);
     };
 
     @method
@@ -81,7 +81,7 @@ namespace SettleNamespace {
 
       proof.verify();
 
-      this.verifiedMessages.requireEquals(proof.publicOutput.newVerifiedMessagesRoot);
+      this.verifiedDataTreeRoot.requireEquals(proof.publicOutput.newVerifiedMessagesRoot);
 
       this.signersTreeRoot.requireEquals(proof.publicOutput.signersTreeRoot);
 
@@ -89,7 +89,7 @@ namespace SettleNamespace {
 
       SETTLE_CONDITION_PERCENTAGE.assertEquals(proof.publicOutput.settleConditionPercentage);
 
-      this.verifiedMessages.set(proof.publicOutput.newVerifiedMessagesRoot);
+      this.verifiedDataTreeRoot.set(proof.publicOutput.newVerifiedMessagesRoot);
     };
 
     @method
@@ -152,4 +152,4 @@ namespace SettleNamespace {
   };
 };
 
-export default SettleNamespace;
+export default SettlementNamespace;
